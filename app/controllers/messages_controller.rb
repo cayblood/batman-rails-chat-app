@@ -55,4 +55,9 @@ class MessagesController < ApplicationController
 
     head :no_content
   end
+
+  # GET /highest_message_id.json
+  def highest_id
+    render json: Message.maximum(:id) || 0
+  end  
 end

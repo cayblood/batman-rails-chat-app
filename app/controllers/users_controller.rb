@@ -55,4 +55,9 @@ class UsersController < ApplicationController
 
     head :no_content
   end
+
+  # GET /highest_user_id.json
+  def highest_id
+    render json: User.maximum(:id) || 0
+  end  
 end
