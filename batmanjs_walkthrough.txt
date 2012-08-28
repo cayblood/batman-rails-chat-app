@@ -1,0 +1,347 @@
+Batman.js Walkthrough
+
+* install rvm with ruby 1.9.3
+* rvm gemset create chat
+* rvm gemset use chat
+* gem install rails-api heroku
+* rails-api new chat
+* add to Gemfile:
+
+group :assets do
+  gem 'sass-rails',   '~> 3.2.3'
+  gem 'coffee-rails', '~> 3.2.1'
+  gem 'therubyracer', :platforms => :ruby
+  gem 'uglifier', '>= 1.0.3'
+end
+gem 'jquery-rails'
+gem 'batman-rails', git: 'git://github.com/Shopify/batman-rails.git'
+gem 'thin'
+gem 'quiet_assets'
+gem 'twitter-bootstrap-rails', :git => 'git://github.com/seyhunak/twitter-bootstrap-rails.git'
+
+* bundle
+* rails g scaffold user name:string
+* rails g scaffold message user_id:integer content:string
+* add to app/models/user.rb:
+
+	has_many :messages
+
+* add to app/models/message.rb
+
+	belongs_to :user
+
+* rake db:migrate
+* Add to db/seeds.rb:
+
+User.create(name: 'Carl')
+User.create(name: 'Olivier')
+User.create(name: 'Marcus')
+
+* rake db:seed
+* rails s then browse to http://localhost:3000/users
+* Should see three users there. http://localhost:3000/messages should be empty.
+* Sign up for heroku if you haven't already
+* Download heroku toolbelt from https://toolbelt.herokuapp.com/
+* heroku login
+* git init
+* git add .
+* git commit -m "init"
+* heroku create
+* git push heroku master
+* heroku run rake db:migrate
+* heroku run rake db:seed
+* heroku open shows rails welcome page
+* browse to /users to see actual users
+* rm public/index.html
+* rails g bootstrap:install
+* rails g bootstrap:layout application fixed
+* rails g batman:install
+* add to app/assets/application.js:
+
+//= require_tree ./views
+
+* remove from app/views/layouts/application.html.erb:
+    <%= csrf_meta_tags %>
+* clear out missing favicon images so we don't get any warnings
+* replace body area before javascripts with:
+
+    <div class="navbar navbar-fixed-top">
+      <div class="navbar-inner">
+        <div class="container">
+          <a class="brand" href="/">Chat</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="container">
+      <div class="content">
+        <div class="row">
+          <div class="span3">
+            <div class="well sidebar-nav">
+              <ul class="nav nav-list">
+                <li class="nav-header">CHATTERS</li>
+                <li data-foreach-user="User.all.sortedBy.name" data-bind="user.name | humanize"></li>
+              </ul>
+            </div>
+          </div>
+          <div class="span9">
+            <form id="message" data-formfor-message="controllers.messages.emptyMessage"
+                  data-event-submit="controllers.messages.create">
+              <input data-view="MessageContentView"
+                     id="message_content"
+                     type="text"
+                     class="span9"
+                     data-bind="message.content"></input>
+            </form>
+            <div id="messages" class="span9" data-yield="main">
+            </div>
+          </div>
+          <%= yield %>
+        </div><!--/row-->
+      </div><!--/content-->
+    </div> <!-- /container -->
+
+* add to config/routes.rb:
+
+  root to: 'main#index'
+
+* create app/controllers/main_controller.rb:
+
+class MainController < ApplicationController
+  def index
+  	render
+  end
+end
+
+* add to app/controllers/application_controller.rb:
+
+	include AbstractController::Layouts
+
+* mkdir -p app/views/main
+* mkdir -p app/assets/javascripts/views
+* touch app/views/main/index.html.erb
+* browsing to http://localhost:3000 should now show layout
+* add to bottom of app/controllers/messages_controller.rb:
+
+  # GET /highest_message_id.json
+  def highest_id
+    render json: Message.maximum(:id) || 0
+  end
+
+* add to bottom of app/controllers/users_controller.rb:
+
+  # GET /highest_user_id.json
+  def highest_id
+    render json: User.maximum(:id) || 0
+  end
+
+* add to config/routes.rb:
+
+  match "highest_user_id" => 'users#highest_id'
+  match "highest_message_id" => 'messages#highest_id'
+
+* add to app/assets/javascripts/chat.js.coffee:
+
+  Batman.ViewStore.prefix = 'assets/views'
+
+  # routing
+  @resources 'users', 'messages'
+  @root 'messages#index'
+* create app/assets/javascripts/views/message_content_view.js.coffee:
+
+class Chat.MessageContentView extends Batman.View
+
+  ready: ->
+    node = jQuery(@get('node'))
+    node.focus()
+
+* refreshing browser should now call focus on input
+* create app/assets/javascripts/models/user.js.coffee:
+
+class Chat.User extends Batman.Model
+  @resourceName: 'user'
+  @storageKey: 'users'
+  @persist Batman.RailsStorage
+
+  # fields
+  @encode 'name'
+  @encode 'created_at', 'updated_at', Batman.Encoders.railsDate
+
+  # validations
+  @validate 'name', presence: true
+
+  # associations
+  @hasMany 'messages', { saveInline: false }
+
+* create app/assets/javascripts/models/message.js.coffee:
+
+class Chat.Message extends Batman.Model
+  @resourceName: 'message'
+  @storageKey: 'messages'
+  @persist Batman.RailsStorage
+
+  # fields
+  @encode 'user_id', 'content'
+  @encode 'created_at', 'updated_at', Batman.Encoders.railsDate
+
+  # validations
+  @validate 'user_id', presence: true
+  @validate 'content', presence: true
+
+  # associations
+  @belongsTo 'user', { inverseOf: 'messages'}
+
+* create app/assets/controllers/messages_controller.js.coffee:
+
+class Chat.MessagesController extends Batman.Controller
+  routingKey: 'messages'
+
+  setUser: =>
+    unless @get('currentUserId')
+      name = prompt("Please state your name")
+      Chat.User.load (err, users) =>
+        foundUser = false
+        for user in users
+          if user.get('name') == name
+            @set 'currentUserId', user.get('id')
+            foundUser = true
+        unless foundUser
+          newUser = new Chat.User(name: name)
+          newUser.save()
+          @set 'currentUserId', newUser.get('id')
+
+  setUserPollingInterval: ->
+    periodicUserMethod = =>
+      jQuery.getJSON '/highest_user_id', '', (data, resp) =>
+        previousHighestUserId = @get('previousHighestUserId') || 0
+        highestUserId = parseInt(data, 10)
+        if highestUserId == 0
+          Chat.User.clear()
+          Chat.User.load (err, results) =>
+            @set 'users', results
+        if highestUserId > previousHighestUserId
+          Chat.User.load (err, results) =>
+            @set 'users', results
+          @set 'previousHighestUserId', highestUserId
+    setInterval(periodicUserMethod, 5000)
+
+  setMessagePollingInterval: ->
+    periodicMessageMethod = =>
+      jQuery.getJSON '/highest_message_id', '', (data, resp) =>
+        previousHighestMessageId = @get('previousHighestMessageId') || 0
+        highestMessageId = parseInt(data, 10)
+        if highestMessageId == 0
+          Chat.Message.clear()
+          Chat.Message.load (err, results) =>
+            @set 'messages', new Batman.Set(results...).sortedBy('created_at', 'desc')
+        if highestMessageId > previousHighestMessageId
+          Chat.Message.load (err, results) =>
+            @set 'messages', new Batman.Set(results...).sortedBy('created_at', 'desc')
+          @set 'previousHighestMessageId', highestMessageId
+    setInterval(periodicMessageMethod, 5000)
+
+  index: (params) ->
+    @set 'emptyMessage', new Chat.Message
+    Chat.Message.load (err, results) =>
+      @set 'messages', new Batman.Set(results...).sortedBy('created_at', 'desc')
+    @setUser()
+    @setUserPollingInterval()
+    @setMessagePollingInterval()
+
+  create: =>
+    console.log('==============================================')
+    @emptyMessage.set 'user_id', @get('currentUserId')
+    @emptyMessage.save =>
+      @set 'emptyMessage', new Chat.Message
+      Chat.Message.load (err, results) =>
+        @set 'messages', new Batman.Set(results...).sortedBy('created_at', 'desc')
+
+* create app/assets/javascripts/helpers/chat_helper.js.coffee:
+
+Batman.mixin Batman.Filters,
+  autolink: (text) ->
+    return undefined if typeof text is 'undefined'
+    # Turns all urls into clickable links.
+    text.replace AUTO_LINK_RE, (href, scheme, offset) ->
+      punctuation = []
+
+      if isAutoLinked(text.slice(0, offset), text.slice(offset + href.length))
+        # do not change string; URL is already linked
+        href
+      else
+        linkText = href
+        href = 'http://' + href unless scheme
+        "<a href=\"#{href}\">#{linkText}</a>"
+
+  prettyDate: (x) ->
+    pad = (a, b) -> (1e15 + a + "").slice(-b)
+    d = new Date(Date.parse(x))
+    pad(d.getHours(), 2) + ":" + pad(d.getMinutes(), 2)
+
+# regexps for determining context, used high-volume
+AUTO_LINK_RE = ///
+  (?: ([0-9A-Za-z+.:-]+:)// | www\. )
+  [^\s<]+
+///g
+AUTO_LINK_CRE = [/<[^>]+$/, /^[^>]*>/, /<a\b.*?>/i, /<\/a>/i]
+AUTO_EMAIL_RE = /[\w.!#\$%+-]+@[\w-]+(?:\.[\w-]+)+/
+
+# Detects already linked context or position in the middle of a tag
+isAutoLinked = (left, right) ->
+  (AUTO_LINK_CRE[0].exec(left) and AUTO_LINK_CRE[1].exec(right)) or
+    (AUTO_LINK_CRE[2].exec(left) and !AUTO_LINK_CRE[3].exec(right))
+
+* create app/assets/javascripts/views/messages/index.html:
+
+<div data-foreach-message="messages">
+  <div class="message" data-partial="messages/_message"></div>
+</div>
+
+* create app/assets/javascripts/views/messages/_message.html:
+
+<p>
+	<span data-bind="message.created_at | prettyDate"></span>
+	<span data-bind="message.user.name"></span>:
+	<span data-bind="message.content | autolink | raw"></span>
+</p>
+
+* create app/assets/javascripts/all_views.json.erb:
+
+<%=
+  prefix = "#{Rails.root}/app/assets/javascripts/views"
+  paths = Dir.glob("#{prefix}/**/*").select{|f| File.file?(f) && (f =~ /\.(html|erb)$/i) }
+  paths.inject({}) do |all_views, f|
+    viewname = f.sub( /^#{prefix}/, '' ).sub( /\..*$/i, '' )
+    view = File.read(f)
+    view = ERB.new(view).result if f =~ /\.erb$/i
+    all_views[viewname] = view
+    all_views
+  end.to_json
+%>
+
+* modify config/environments/production.rb:
+
+	config.assets.precompile += %w(all_views.json)
+
+* create app/assets/javascripts/helpers/views_preloader.js.coffee.erb:
+
+Chat.preloadViews = () ->
+  new Batman.Request
+    url: '<%= asset_path("all_views.json") %>'
+    type: 'json'
+    error: (response)  -> throw new Error("Could not load views")
+    success: (all_views) =>
+      for view of all_views
+        Batman.View.store.set(view, all_views[view])
+
+* Add this to the run function on app/assets/javascripts/chat.js.coffee:
+
+    Chat.preloadViews()
+
+* browsing with multiple browsers should hopefully work although there is some weird cache issue at the moment
+
+* git add .
+* git rm -f public/index.html
+* git commit -m "Finished demo app"
+* git push heroku master
+* heroku open
